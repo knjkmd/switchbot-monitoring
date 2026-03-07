@@ -1,0 +1,21 @@
+@startuml
+left to right direction
+
+actor "SwitchBot Cloud" as SwitchBot
+
+node "Python Collector\n(Kubernetes CronJob)" {
+  component "switchbot_collector.py"
+}
+
+node "Monitoring Stack\n(Kubernetes)" {
+  component "Pushgateway"
+  component "Prometheus"
+  component "Grafana"
+}
+
+SwitchBot --> "switchbot_collector.py" : REST API
+"switchbot_collector.py" --> Pushgateway : push metrics
+Pushgateway --> Prometheus : scrape
+Prometheus --> Grafana : query
+
+@enduml
