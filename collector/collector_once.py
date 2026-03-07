@@ -1,116 +1,169 @@
-import os
-import requests
-import logging
-from datetime import datetime, timezone
-from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
-import random, time
+"""
+SwitchBot Thermometer Collector
 
-# ---- Logging Configuration ----
+Fetches temperature and humidity data from the SwitchBot API
+and pushes metrics to Prometheus Pushgateway.
+
+Designed to run as a Kubernetes CronJob.
+"""
+
+import os
+import time
+import random
+import logging
+import requests
+from typing import Tuple
+from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
+
+
+# ----------------------------------------------------------------------
+# Logging Configuration
+# ----------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format="%(asctime)s | %(levelname)s | %(message)s",
 )
+logger = logging.getLogger(__name__)
 
-# ---- Config from env (K8s-friendly) ----
-SWITCHBOT_TOKEN = os.environ["SWITCHBOT_TOKEN"]
-DEVICE_ID = os.environ["DEVICE_ID"]
-LOCATION = os.environ["LOCATION"]
 
-MONGODB_URI = os.environ.get(
-    "MONGODB_URI",
-    "mongodb://mongodb:27017"
-)
+# ----------------------------------------------------------------------
+# Configuration
+# ----------------------------------------------------------------------
+def load_config() -> dict:
+    """Load configuration from environment variables."""
+    try:
+        return {
+            "token": os.environ["SWITCHBOT_TOKEN"],
+            "device_id": os.environ["DEVICE_ID"],
+            "location": os.environ["LOCATION"],
+            "pushgateway": os.environ.get(
+                "PUSHGATEWAY_URL",
+                "http://pushgateway:9091"
+            ),
+            "job_name": "switchbot_thermometer",
+        }
+    except KeyError as e:
+        logger.error(f"Missing required environment variable: {e}")
+        raise
 
-PUSHGATEWAY = os.environ.get(
-    "PUSHGATEWAY_URL",
-    "http://pushgateway:9091"
-)
 
-JOB_NAME = "switchbot_thermometer"
+# ----------------------------------------------------------------------
+# SwitchBot API
+# ----------------------------------------------------------------------
+def fetch_switchbot_status(token: str, device_id: str) -> Tuple[float, float]:
+    """
+    Call SwitchBot API and return (temperature, humidity).
+    """
+    logger.info(f"Fetching data for device {device_id}")
 
-# ---- Call SwitchBot API ----
-try:
-    time.sleep(random.randint(0, 30))  # Random delay to avoid simultaneous API calls
-    logging.info(f"Calling SwitchBot API for device {DEVICE_ID}")
-    resp = requests.get(
-        f"https://api.switch-bot.com/v1.1/devices/{DEVICE_ID}/status",
-        headers={"Authorization": SWITCHBOT_TOKEN},
-        timeout=10,
-    )
-    resp.raise_for_status()
-    
-    body = resp.json()["body"]
-    
-    temperature = body["temperature"]
-    humidity = body["humidity"]
-    #battery = body["battery"]
-    
-#    logging.info(f"Successfully retrieved SwitchBot data - Temp: {temperature}°C, Humidity: {humidity}%, Battery: {battery}%")
-    logging.info(f"Successfully retrieved SwitchBot data - Temp: {temperature}°C, Humidity: {humidity}%")
-except requests.exceptions.Timeout:
-    logging.error("SwitchBot API call timed out after 10 seconds")
-    raise
-except requests.exceptions.HTTPError as e:
-    logging.error(f"SwitchBot API returned HTTP error: {e.response.status_code} - {e.response.text}")
-    raise
-except requests.exceptions.RequestException as e:
-    logging.error(f"SwitchBot API request failed: {e}")
-    raise
-except (KeyError, ValueError) as e:
-    logging.error(f"Failed to parse SwitchBot API response: {e}")
-    raise
+    # Random delay to avoid burst API calls
+    time.sleep(random.randint(0, 30))
 
-# ---- Push metrics (one-shot) ----
-registry = CollectorRegistry()
+    url = f"https://api.switch-bot.com/v1.1/devices/{device_id}/status"
 
-temperature_gauge = Gauge(
-    "switchbot_temperature_celsius",
-    "Temperature from SwitchBot thermometer",
-    ["device_id", "location"],
-    registry=registry,
-)
+    try:
+        response = requests.get(
+            url,
+            headers={"Authorization": token},
+            timeout=10,
+        )
+        response.raise_for_status()
 
-humidity_gauge = Gauge(
-    "switchbot_humidity_percent",
-    "Humidity from SwitchBot thermometer",
-    ["device_id", "location"],
-    registry=registry,
-)
+        body = response.json()["body"]
+        temperature = body["temperature"]
+        humidity = body["humidity"]
 
-# battery_gauge = Gauge(
-#     "switchbot_battery_percent",
-#     "Battery level",
-#     ["device_id", "location"],
-#     registry=registry,
-# )
+        logger.info(
+            f"Retrieved data | Temp: {temperature}°C | Humidity: {humidity}%"
+        )
 
-temperature_gauge.labels(device_id=DEVICE_ID, location=LOCATION).set(temperature)
-humidity_gauge.labels(device_id=DEVICE_ID, location=LOCATION).set(humidity)
-#battery_gauge.labels(device_id=DEVICE_ID, location=LOCATION).set(battery)
+        return temperature, humidity
 
-# ---- Push metrics to Pushgateway ----
-try:
-    logging.info(f"Pushing metrics to Pushgateway at {PUSHGATEWAY}")
-    push_to_gateway(
-        PUSHGATEWAY,
-        job=JOB_NAME,
-        grouping_key={
-           "device_id": DEVICE_ID,
-            "location": LOCATION
-        },
+    except requests.exceptions.RequestException as e:
+        logger.error(f"SwitchBot API request failed: {e}")
+        raise
+    except (KeyError, ValueError) as e:
+        logger.error(f"Invalid API response format: {e}")
+        raise
+
+
+# ----------------------------------------------------------------------
+# Prometheus Push
+# ----------------------------------------------------------------------
+def push_metrics(
+    pushgateway: str,
+    job_name: str,
+    device_id: str,
+    location: str,
+    temperature: float,
+    humidity: float,
+) -> None:
+    """Push metrics to Prometheus Pushgateway."""
+
+    registry = CollectorRegistry()
+
+    temperature_gauge = Gauge(
+        "switchbot_temperature_celsius",
+        "Temperature from SwitchBot thermometer",
+        ["device_id", "location"],
         registry=registry,
     )
-    logging.info("Successfully pushed metrics to Pushgateway")
-except requests.exceptions.Timeout:
-    logging.error(f"Pushgateway connection timed out at {PUSHGATEWAY}")
-    raise
-except requests.exceptions.ConnectionError as e:
-    logging.error(f"Failed to connect to Pushgateway at {PUSHGATEWAY}: {e}")
-    raise
-except requests.exceptions.RequestException as e:
-    logging.error(f"Pushgateway request failed: {e}")
-    raise
-except Exception as e:
-    logging.error(f"Unexpected error while pushing to Pushgateway: {e}")
-    raise
 
+    humidity_gauge = Gauge(
+        "switchbot_humidity_percent",
+        "Humidity from SwitchBot thermometer",
+        ["device_id", "location"],
+        registry=registry,
+    )
+
+    temperature_gauge.labels(
+        device_id=device_id,
+        location=location
+    ).set(temperature)
+
+    humidity_gauge.labels(
+        device_id=device_id,
+        location=location
+    ).set(humidity)
+
+    try:
+        logger.info(f"Pushing metrics to {pushgateway}")
+        push_to_gateway(
+            pushgateway,
+            job=job_name,
+            grouping_key={
+                "device_id": device_id,
+                "location": location,
+            },
+            registry=registry,
+        )
+        logger.info("Metrics pushed successfully")
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Failed to push metrics: {e}")
+        raise
+
+
+# ----------------------------------------------------------------------
+# Main
+# ----------------------------------------------------------------------
+def main() -> None:
+    config = load_config()
+
+    temperature, humidity = fetch_switchbot_status(
+        config["token"],
+        config["device_id"],
+    )
+
+    push_metrics(
+        config["pushgateway"],
+        config["job_name"],
+        config["device_id"],
+        config["location"],
+        temperature,
+        humidity,
+    )
+
+
+if __name__ == "__main__":
+    main()
