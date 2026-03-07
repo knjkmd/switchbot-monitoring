@@ -43,6 +43,9 @@ switchbot-monitoring/
 
 ## Running Locally
 
+### Deploying the prometheus stack
+Monitoring stack deployed via kube-prometheus-stack Helm chart, including Prometheus Operator, Alertmanager, and Grafana.
+
 ### Build the container
 
 ```
