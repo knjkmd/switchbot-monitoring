@@ -71,11 +71,17 @@ podman run --rm \
 kubectl apply -f k8s/
 ```
 
-## Dashboard Preview
+## Grafana Dashboard
 
-Example Grafana dashboards showing temperature and humidity trends:
+The Grafana dashboard used in this project is included in this repository.
 
-![Dashboard Screenshot](docs/screenshots/dashboard.png)
+To import it:
+
+1. Open Grafana
+2. Go to **Dashboards → Import**
+3. Upload `grafana/home_temperature_dashboard.json`
+
+![Dashboard](docs/dashboard.png)
 
 
 ## Challenges & Lessons Learned
