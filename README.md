@@ -10,6 +10,8 @@ It demonstrates an end-to-end monitoring pipeline running on Kubernetes.
 
 SwitchBot API → Python Collector → Pushgateway → Prometheus → Grafana
 
+![Architecture](docs/screenshots/architecture.png)
+
 ## Features
 
 * Containerized Python data collector
