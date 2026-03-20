@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  creationTimestamp: null
+  labels:
+    run: splunk
+  name: splunk
+spec:
+  containers:
+  - image: splunk/splunk:latest
+    name: splunk
+    resources: {}
+    env:
+    - name: SPLUNK_START_ARGS
+      value: "--accept-license"
+    - name: SPLUNK_GENERAL_TERMS
+      value: "--accept-sgt-current-at-splunk-com"
+    - name: SPLUNK_PASSWORD
+      value: "changeme"
+  dnsPolicy: ClusterFirst
+  restartPolicy: Always
+status: {}
+
+
+
+
