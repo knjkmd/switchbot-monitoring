@@ -17,6 +17,22 @@ spec:
       value: "--accept-sgt-current-at-splunk-com"
     - name: SPLUNK_PASSWORD
       value: "changeme"
+    volumeMounts:
+    - mountPath: /opt/splunk/etc
+      name: splunk-etc-volume
+    - mountPath: /opt/splunk/var/lib/splunk
+      name: splunk-var-lib-splunk-volume
+  volumes:
+  - name: splunk-etc-volume
+    # mount /data/foo, but only if that directory already exists
+    hostPath:
+      path: /home/kenji/switchbot-monitoring/k8s/splunk/etc # directory location on host
+      type: Directory # this field is optional
+  - name: splunk-var-lib-splunk-volume
+    # mount /data/foo, but only if that directory already exists
+    hostPath:
+      path: /home/kenji/switchbot-monitoring/k8s/splunk/var/lib/splunk # directory location on host
+      type: Directory # this field is optional
   dnsPolicy: ClusterFirst
   restartPolicy: Always
 status: {}
