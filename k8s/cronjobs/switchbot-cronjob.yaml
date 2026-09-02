@@ -1,34 +1,39 @@
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: switchbot-collector-bathroom
+  name: switchbot-collector
   namespace: monitoring
 spec:
-  failedJobsHistoryLimit: 10  # default is 1
-  schedule: "*/1 * * * *"  # every minute
+  schedule: "*/1 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
       backoffLimit: 2
+      activeDeadlineSeconds: 55
       template:
         spec:
           restartPolicy: OnFailure
           containers:
           - name: collector
-            image: localhost/switchbot-collector:0.8        # local image in containerd
-            imagePullPolicy: Never                 # do not attempt to pull from registry
+            image: localhost/switchbot-collector:1.0
+            imagePullPolicy: Never
             env:
             - name: SWITCHBOT_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: switchbot-secret
                   key: SWITCHBOT_TOKEN
-            - name: DEVICE_ID
-              value: "D43533341F67"
-            - name: LOCATION
-              value: "Bathroom"
+            - name: DEVICES_FILE
+              value: /config/devices.json
             - name: PUSHGATEWAY_URL
-              value: "http://pushgateway.monitoring.svc:9091"
-
+              value: http://pushgateway.monitoring.svc:9091
+            volumeMounts:
+            - name: device-config
+              mountPath: /config
+              readOnly: true
+          volumes:
+          - name: device-config
+            configMap:
+              name: switchbot-devices

@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: switchbot-devices
+  namespace: monitoring
+data:
+  devices.json: |
+    [
+      {"device_id": "D43533341F67", "location": "Bathroom"},
+      {"device_id": "EFC5997EFEB2", "location": "Bedroom"},
+      {"device_id": "EC2E84063F7D", "location": "Car"},
+      {"device_id": "C6E81B436DAA", "location": "LivingRoom"},
+      {"device_id": "D53533344B07", "location": "Office"},
+      {"device_id": "CA5F46060A41", "location": "Outside"}
+    ]
