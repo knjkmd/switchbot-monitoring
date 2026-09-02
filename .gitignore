@@ -1,4 +1,7 @@
 tmp/
 *.jar
+.venv/
+.env.local
+my_switchbot_devices.txt
 
 
