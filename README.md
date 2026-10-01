@@ -10,6 +10,8 @@ It demonstrates an end-to-end monitoring pipeline running on Kubernetes.
 
 SwitchBot API → Python Collector → Pushgateway → Prometheus → Grafana
 
+Shelly MQTT → Mosquitto → Shelly Collector → Pushgateway → Prometheus → Grafana
+
 ![Architecture](docs/screenshots/architecture.png)
 
 ## Features
@@ -76,7 +78,8 @@ kubectl apply -f k8s/
 The separate collector in `collector/shelly/` continuously reads MQTT notifications
 from the existing `mosquitto:1883` service. It writes one JSON object per accepted
 `NotifyFullStatus` message to stdout, with diagnostics on stderr. It does not send
-data to Splunk or Pushgateway, and does not change Mosquitto.
+data to Splunk. It also publishes readings to the existing Pushgateway for
+Prometheus and Grafana, and does not change Mosquitto.
 
 MQTT does not allow partial-level wildcards: `shellyhtg3-+/events/rpc` is invalid.
 The collector subscribes to `+/events/rpc` and locally accepts only topics shaped
@@ -94,7 +97,7 @@ Example stdout (one line):
 Build with the Shelly directory as the build context:
 
 ```bash
-podman build -t localhost/shelly-collector:1.0 collector/shelly
+podman build -t localhost/shelly-collector:1.1 collector/shelly
 ```
 
 The manifest follows the existing local-image convention (`imagePullPolicy:
@@ -102,7 +105,7 @@ Never`). Load the image into the container runtime on every eligible Kubernetes
 node before deploying. For example, for a local containerd cluster:
 
 ```bash
-podman save --format docker-archive -o /tmp/shelly-collector.tar localhost/shelly-collector:1.0
+podman save --format docker-archive -o /tmp/shelly-collector.tar localhost/shelly-collector:1.1
 sudo ctr -n k8s.io images import /tmp/shelly-collector.tar
 ```
 
@@ -112,6 +115,9 @@ pull policy instead. Deploy into the **same namespace as Mosquitto**, since
 existing Mosquitto manifest, does not hard-code a namespace:
 
 ```bash
+kubectl apply -f k8s/pushgateway/pushgateway-service.yaml
+kubectl apply -f k8s/pushgateway/pushgateway-servicemonitor.yaml
+kubectl -n YOUR_MOSQUITTO_NAMESPACE apply -f k8s/monitoring/shelly-devices-configmap.yaml
 kubectl -n YOUR_MOSQUITTO_NAMESPACE apply -f k8s/monitoring/shelly-collector-deployment.yaml
 kubectl -n YOUR_MOSQUITTO_NAMESPACE rollout status deployment/shelly-collector
 kubectl -n YOUR_MOSQUITTO_NAMESPACE logs -f deployment/shelly-collector
@@ -132,11 +138,51 @@ python3 -m venv .venv
 MQTT_HOST=localhost MQTT_PORT=31883 .venv/bin/python collector/shelly/collector.py
 ```
 
-Run the focused tests without installing MQTT dependencies:
+Run the collector and pipeline tests after installing the dependencies:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=collector/shelly python3 -m unittest discover -s collector/shelly/tests -v
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=collector/shelly .venv/bin/python -m unittest discover -s collector/shelly/tests -v
 ```
+
+### Shelly metrics and Grafana
+
+The MQTT callback prints JSON and queues the latest reading per device. A background
+worker pushes pending readings every five seconds under `job="shelly_thermometers"`,
+with a five-second HTTP timeout. Failed pushes retry while the process runs;
+new readings replace older pending readings. The pending queue is in memory and
+is lost on restart. Separate device grouping keys prevent one device's update
+from replacing another device's metrics. The SwitchBot job remains separate.
+
+Metrics use `device_id` and `location` labels:
+
+| Metric | Value |
+|---|---|
+| `shelly_temperature_celsius` | Temperature |
+| `shelly_humidity_percent` | Relative humidity |
+| `shelly_wifi_rssi_dbm` | Wi-Fi RSSI |
+| `shelly_device_timestamp_seconds` | Device Unix timestamp |
+| `shelly_last_received_unixtime` | Collector receipt Unix timestamp |
+
+Edit `k8s/monitoring/shelly-devices-configmap.yaml` to map device IDs to rooms,
+then apply it in the collector's namespace and restart the Deployment. Unmapped
+devices are collected automatically and use their device ID as `location`.
+The optional `DEVICES_FILE` setting reads the same list format as SwitchBot.
+`PUSHGATEWAY_URL` defaults to `http://pushgateway.monitoring.svc:9091`.
+
+The Pushgateway Service label now matches the existing ServiceMonitor selector.
+The monitoring stack must select this ServiceMonitor (`release: monitoring`).
+Prometheus scrapes every 30 seconds. Import the updated
+`grafana/home_temperature_dashboard.json` using the existing `prometheus` data
+source to see Shelly temperature, humidity, RSSI, and reading age alongside
+SwitchBot panels. Metrics are stored at Prometheus scrape times, not device times.
+
+After deployment, check collector logs and query `shelly_temperature_celsius`
+in Prometheus or Grafana Explore. Then check
+`time() - shelly_last_received_unixtime` to confirm readings are recent.
+Pushgateway retains old values when devices stop reporting, so use the reading-age
+panel to identify stale data. Decommissioned device groups must be removed from
+Pushgateway manually; restarts do not delete them. During gateway outages,
+intermediate readings may be coalesced into the latest reading per device.
 
 ## Grafana Dashboard
 

@@ -3,6 +3,8 @@ kind: Service
 metadata:
   name: pushgateway
   namespace: monitoring
+  labels:
+    app: pushgateway
 spec:
   type: ClusterIP
   selector:
@@ -11,4 +13,3 @@ spec:
     - name: http
       port: 9091
       targetPort: 9091
-

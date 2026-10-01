@@ -51,6 +51,8 @@ def on_message(client, userdata, message) -> None:
         return
     if record is not None:
         print(json.dumps(record, allow_nan=False, separators=(",", ":")), flush=True)
+        if userdata is not None:
+            userdata.submit(record)
 
 
 def on_connect(client, userdata, flags, reason_code, properties) -> None:
@@ -70,9 +72,28 @@ def on_subscribe(client, userdata, mid, reason_codes, properties) -> None:
 
 def main() -> None:
     import paho.mqtt.client as mqtt
+    from metrics import MetricsPublisher
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
-    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    locations = {}
+    if os.environ.get("DEVICES_FILE"):
+        with open(os.environ["DEVICES_FILE"], encoding="utf-8") as file:
+            devices = json.load(file)
+        if not isinstance(devices, list):
+            raise ValueError("Device configuration must be a JSON list")
+        for device in devices:
+            if (not isinstance(device, dict)
+                    or not isinstance(device.get("device_id"), str)
+                    or not device["device_id"].startswith("shellyhtg3-")
+                    or not isinstance(device.get("location"), str)
+                    or not device["location"]):
+                raise ValueError("Each device needs a shellyhtg3- device_id and location")
+            if device["device_id"] in locations:
+                raise ValueError("Duplicate device_id in device configuration")
+            locations[device["device_id"]] = device["location"]
+    publisher = MetricsPublisher(os.environ.get(
+        "PUSHGATEWAY_URL", "http://pushgateway.monitoring.svc:9091"), locations)
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, userdata=publisher)
     client.on_connect = on_connect
     client.on_subscribe = on_subscribe
     client.on_message = on_message
@@ -83,9 +104,11 @@ def main() -> None:
     client.connect_async(os.environ.get("MQTT_HOST", "mosquitto"),
                          int(os.environ.get("MQTT_PORT", "1883")), keepalive=60)
     try:
+        publisher.start()
         client.loop_forever(retry_first_connection=True)
     finally:
         client.disconnect()
+        publisher.stop()
 
 
 if __name__ == "__main__":

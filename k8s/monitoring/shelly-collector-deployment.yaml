@@ -18,13 +18,21 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
         - name: collector
-          image: localhost/shelly-collector:1.0
+          image: localhost/shelly-collector:1.1
           imagePullPolicy: Never
           env:
             - name: MQTT_HOST
               value: mosquitto
             - name: MQTT_PORT
               value: "1883"
+            - name: PUSHGATEWAY_URL
+              value: http://pushgateway.monitoring.svc:9091
+            - name: DEVICES_FILE
+              value: /config/devices.json
+          volumeMounts:
+            - name: device-config
+              mountPath: /config
+              readOnly: true
           resources:
             requests:
               cpu: 10m
@@ -39,3 +47,7 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+      volumes:
+        - name: device-config
+          configMap:
+            name: shelly-devices
