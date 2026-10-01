@@ -71,6 +71,73 @@ podman run --rm \
 kubectl apply -f k8s/
 ```
 
+## Shelly H&T Gen3 MQTT collector
+
+The separate collector in `collector/shelly/` continuously reads MQTT notifications
+from the existing `mosquitto:1883` service. It writes one JSON object per accepted
+`NotifyFullStatus` message to stdout, with diagnostics on stderr. It does not send
+data to Splunk or Pushgateway, and does not change Mosquitto.
+
+MQTT does not allow partial-level wildcards: `shellyhtg3-+/events/rpc` is invalid.
+The collector subscribes to `+/events/rpc` and locally accepts only topics shaped
+like `shellyhtg3-000000000001/events/rpc`. `device` is the first topic level.
+Temperature, humidity, RSSI, and the device's Unix timestamp are preserved as
+numbers. Missing or invalid numeric fields cause the notification to be skipped
+with a warning. `collector_received_at` records receipt in UTC ISO 8601.
+
+Example stdout (one line):
+
+```json
+{"device":"shellyhtg3-000000000001","temperature_c":22.5,"humidity_pct":48,"wifi_rssi":-62,"device_ts":1790856000.5,"collector_received_at":"2026-10-01T12:00:00+00:00"}
+```
+
+Build with the Shelly directory as the build context:
+
+```bash
+podman build -t localhost/shelly-collector:1.0 collector/shelly
+```
+
+The manifest follows the existing local-image convention (`imagePullPolicy:
+Never`). Load the image into the container runtime on every eligible Kubernetes
+node before deploying. For example, for a local containerd cluster:
+
+```bash
+podman save --format docker-archive -o /tmp/shelly-collector.tar localhost/shelly-collector:1.0
+sudo ctr -n k8s.io images import /tmp/shelly-collector.tar
+```
+
+For a registry-based cluster, push the image and update the manifest's image and
+pull policy instead. Deploy into the **same namespace as Mosquitto**, since
+`mosquitto` resolves within the pod's namespace. The new manifest, like the
+existing Mosquitto manifest, does not hard-code a namespace:
+
+```bash
+kubectl -n YOUR_MOSQUITTO_NAMESPACE apply -f k8s/monitoring/shelly-collector-deployment.yaml
+kubectl -n YOUR_MOSQUITTO_NAMESPACE rollout status deployment/shelly-collector
+kubectl -n YOUR_MOSQUITTO_NAMESPACE logs -f deployment/shelly-collector
+```
+
+The Deployment runs one replica with `Recreate` updates to avoid overlapping
+collectors during a rollout. It reconnects with backoff and resubscribes after
+connections are restored. MQTT delivery may include duplicates; there is no
+durable buffering or deduplication. Messages published while disconnected may
+be missed. SIGTERM disconnects the MQTT client for pod shutdown.
+
+`MQTT_HOST` and `MQTT_PORT` override the defaults (`mosquitto` and `1883`).
+For local execution, use a virtual environment and a reachable broker address:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r collector/shelly/requirements.txt
+MQTT_HOST=localhost MQTT_PORT=31883 .venv/bin/python collector/shelly/collector.py
+```
+
+Run the focused tests without installing MQTT dependencies:
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=collector/shelly python3 -m unittest discover -s collector/shelly/tests -v
+```
+
 ## Grafana Dashboard
 
 The Grafana dashboard used in this project is included in this repository.
