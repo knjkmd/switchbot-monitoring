@@ -4,17 +4,17 @@ metadata:
   name: switchbot-collector
   namespace: monitoring
 spec:
-  schedule: "*/1 * * * *"
+  schedule: "*/2 * * * *"
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 1
   failedJobsHistoryLimit: 3
   jobTemplate:
     spec:
-      backoffLimit: 2
+      backoffLimit: 0
       activeDeadlineSeconds: 55
       template:
         spec:
-          restartPolicy: OnFailure
+          restartPolicy: Never
           containers:
           - name: collector
             image: localhost/switchbot-collector:1.0
